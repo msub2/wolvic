@@ -422,6 +422,55 @@ struct DeviceDelegateOculusVR::State {
           controllerState.created = true;
         }
       }
+      else if (capsHeader.Type == ovrControllerType_Hand) {
+        ovrInputHandCapabilities caps = {};
+        caps.Header = capsHeader;
+        ovrResult result = vrapi_GetInputDeviceCapabilities(ovr, &caps.Header);
+        if (result != ovrSuccess) {
+          VRB_LOG("vrapi_GetInputDeviceCapabilities failed with error: %d", result);
+          continue;
+        }
+        const int32_t index = FindControllerIndex(caps.HandCapabilities & ovrControllerCaps_LeftHand ? ElbowModel::HandEnum::Left : ElbowModel::HandEnum::Right);
+        if ((index < 0) || index >= (controllerStateList.size())) {
+          continue;
+        }
+        ControllerState& controllerState = controllerStateList[index];
+        if ((controllerState.deviceId != ovrDeviceIdType_Invalid) &&
+            (controllerState.deviceId != capsHeader.DeviceID)) {
+          VRB_DEBUG("%s handed controller DeviceID has changed from %u to %u",
+                    (controllerState.hand == ElbowModel::HandEnum::Left ? "Left" : "Right"),
+                    controllerState.deviceId, capsHeader.DeviceID);
+        }
+        controllerState.deviceId = capsHeader.DeviceID;
+        // TODO: Create a HandDelegate class since we'll probably need that
+        controllerState.capabilities = caps;
+        controllerState.enabled = true;
+
+        if (!controllerState.created) {
+          vrb::Matrix beamTransform(vrb::Matrix::Identity());
+          if (controllerState.capabilities.ControllerCapabilities) {
+            std::string controllerName;
+            if (controllerState.hand == ElbowModel::HandEnum::Left) {
+              beamTransform.TranslateInPlace(vrb::Vector(-0.011f, -0.007f, 0.0f));
+              controllerName = "Hand (Left)";
+            } else {
+              beamTransform.TranslateInPlace(vrb::Vector(0.011f, -0.007f, 0.0f));
+              controllerName = "Hand (Right)";
+            }
+            controller->CreateController(controllerState.index, int32_t(controllerState.hand),
+                                         controllerName, beamTransform);
+            controller->SetButtonCount(controllerState.index, 7);
+            controller->SetHapticCount(controllerState.index, 1);
+            controller->SetControllerType(controllerState.index, deviceType);
+
+            float offsetX = controllerState.hand == ElbowModel::HandEnum::Left ? 0.011f : -0.011f;
+            const vrb::Matrix trans = vrb::Matrix::Position(vrb::Vector(offsetX, 0.025f, 0.05f));
+            controller->SetImmersiveBeamTransform(controllerState.index, trans);
+          }
+          controller->SetTargetRayMode(controllerState.index, device::TargetRayMode::TrackedPointer);
+          controllerState.created = true;
+        }
+      }
     }
     for (ControllerState& controllerState: controllerStateList) {
       controller->SetLeftHanded(controllerState.index, controllerState.hand == ElbowModel::HandEnum::Left);
